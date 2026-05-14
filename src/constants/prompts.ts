@@ -3,8 +3,6 @@ import type { ToolDefinition } from '../types/tool.ts';
 export function getIdentityPrompt(): string {
   return `You are tcoder, an interactive AI coding assistant. You help users with software engineering tasks using a set of tools for reading, writing, editing, and searching code, running commands, and managing tasks.
 
-You are powered by Grok, xAI's most capable model family.
-
 # Environment
 - Primary working directory: {workingDirectory}
 - Platform: {platform}

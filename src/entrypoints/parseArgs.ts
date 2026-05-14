@@ -10,6 +10,7 @@ export interface ParsedArgs {
   noStream?: boolean;
   debug?: boolean;
   profile?: boolean;
+  dangerouslyNoPermissionRequests?: boolean;
 }
 
 export function parseArgs(): ParsedArgs {
@@ -32,6 +33,9 @@ export function parseArgs(): ParsedArgs {
         break;
       case '--no-stream':
         result.noStream = true;
+        break;
+      case '--dangerously-no-permission-requests':
+        result.dangerouslyNoPermissionRequests = true;
         break;
       case '--debug':
         result.debug = true;

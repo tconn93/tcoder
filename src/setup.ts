@@ -41,7 +41,7 @@ export function checkSetupStatus(): SetupContext {
 }
 
 export function hasApiKey(): boolean {
-  return !!(process.env.XAI_API_KEY || process.env.XAI_API_KEY);
+  return !!(process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY);
 }
 
 export function runSetup(interactive = true): SetupResult {
@@ -90,7 +90,7 @@ export function runSetup(interactive = true): SetupResult {
     steps.push({
       name: 'API key',
       status: 'error',
-      message: 'Set XAI_API_KEY or XAI_API_KEY environment variable',
+      message: 'Set XAI_API_KEY or ANTHROPIC_API_KEY environment variable',
     });
     if (!interactive) {
       return { success: false, message: 'API key not found', steps };
@@ -130,7 +130,7 @@ function createDefaultConfig(): Record<string, unknown> {
     createdAt: new Date().toISOString(),
     settings: {
       compactThreshold: 400,
-      maxToolCallsPerTurn: 50,
+      maxToolCallsPerTurn: 250,
       sandboxTimeout: 120000,
       hookTimeout: 60000,
     },
@@ -160,7 +160,7 @@ export function printWelcome(setupResult: SetupResult): void {
   if (!setupResult.success) {
     const apiKeyStep = setupResult.steps.find(s => s.name === 'API key');
     if (apiKeyStep && apiKeyStep.status === 'error') {
-      console.log('\x1b[33m%s\x1b[0m', 'Warning: No API key found. Set XAI_API_KEY environment variable.');
+      console.log('\x1b[33m%s\x1b[0m', 'Warning: No API key found. Set XAI_API_KEY or ANTHROPIC_API_KEY environment variable.');
       console.log();
     }
   }

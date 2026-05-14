@@ -120,6 +120,7 @@ async function main(): Promise<void> {
     workingDir: args.dir,
     prompt: args.prompt,
     stream: !args.noStream,
+    dangerouslyNoPermissionRequests: args.dangerouslyNoPermissionRequests,
   });
 
   profile('app-started');
@@ -247,6 +248,8 @@ Options:
   --no-stream         Disable streaming responses
   --debug             Enable debug output
   --profile           Show startup profile timings
+  --dangerously-no-permission-requests
+                      Skip all tool permission prompts (use with caution)
 
 Examples:
   tcoder                                    Start interactive session

@@ -500,6 +500,7 @@ export async function executeToolCalls(
     workingDirectory: string;
     signal: AbortSignal;
     messages: Message[];
+    confirmFn?: (toolName: string, input: Record<string, unknown>) => Promise<boolean>;
     onProgress?: (toolName: string, status: 'started' | 'completed' | 'error') => void;
   },
 ): Promise<{ messages: Message[]; functionCallOutputs: Array<{ call_id: string; output: string }> }> {
@@ -516,6 +517,30 @@ export async function executeToolCalls(
       resultMessages.push(createToolResultMessage(call.callId, { content: errMsg, isError: true }));
       functionCallOutputs.push({ call_id: call.callId, output: errMsg });
       continue;
+    }
+
+    // Permission enforcement based on mode
+    if (!tool.isReadOnly) {
+      const mode = context.permissionMode;
+      if (mode === 'plan') {
+        const errMsg = `Tool '${call.name}' is not allowed in plan mode (read-only)`;
+        resultMessages.push(createToolResultMessage(call.callId, { content: errMsg, isError: true }));
+        functionCallOutputs.push({ call_id: call.callId, output: errMsg });
+        context.onProgress?.(call.name, 'error');
+        callIndex++;
+        continue;
+      }
+      if ((mode === 'default' || mode === 'acceptEdits') && context.confirmFn) {
+        const allowed = await context.confirmFn(call.name, call.input);
+        if (!allowed) {
+          const errMsg = `Tool '${call.name}' was denied by user`;
+          resultMessages.push(createToolResultMessage(call.callId, { content: errMsg, isError: true }));
+          functionCallOutputs.push({ call_id: call.callId, output: errMsg });
+          context.onProgress?.(call.name, 'error');
+          callIndex++;
+          continue;
+        }
+      }
     }
 
     const toolContext = {
@@ -537,6 +562,7 @@ export async function executeToolCalls(
         resultMessages.push(createToolResultMessage(call.callId, { content: errMsg, isError: true }));
         functionCallOutputs.push({ call_id: call.callId, output: errMsg });
         context.onProgress?.(call.name, 'error');
+        callIndex++;
         continue;
       }
 
@@ -558,11 +584,13 @@ export async function executeToolCalls(
 }
 
 function getApiKey(): string {
-  return (
-    process.env.XAI_API_KEY ??
-    process.env.ANTHROPIC_API_KEY ??
-    ''
-  );
+  const key = process.env.XAI_API_KEY || process.env.ANTHROPIC_API_KEY;
+  if (!key) {
+    throw new Error(
+      'No API key found. Set the XAI_API_KEY or ANTHROPIC_API_KEY environment variable.',
+    );
+  }
+  return key;
 }
 
 function generateMessageId(): string {
