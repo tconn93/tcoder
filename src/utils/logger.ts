@@ -1,3 +1,8 @@
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { getAppDataDir } from './shell.ts';
+import { LOGS_DIR } from '../constants/common.ts';
+
 export enum LogLevel {
   DEBUG = 0,
   INFO = 1,
@@ -17,6 +22,7 @@ export interface LoggerOptions {
   level?: LogLevel;
   prefix?: string;
   silent?: boolean;
+  fileLogging?: boolean;
   onLog?: (entry: LogEntry) => void;
 }
 
@@ -24,6 +30,8 @@ export class Logger {
   private level: LogLevel;
   private prefix: string;
   private silent: boolean;
+  private fileLogging: boolean;
+  private logFilePath: string | null = null;
   private history: LogEntry[] = [];
   private maxHistory: number;
   private listeners: Array<(entry: LogEntry) => void> = [];
@@ -32,10 +40,37 @@ export class Logger {
     this.level = options.level ?? LogLevel.INFO;
     this.prefix = options.prefix ?? '';
     this.silent = options.silent ?? false;
+    this.fileLogging = options.fileLogging ?? false;
     this.maxHistory = 1000;
 
     if (options.onLog) {
       this.listeners.push(options.onLog);
+    }
+  }
+
+  private getLogFilePath(): string | null {
+    if (!this.fileLogging) return null;
+    if (this.logFilePath) return this.logFilePath;
+    try {
+      const logsDir = resolve(getAppDataDir(), LOGS_DIR);
+      if (!existsSync(logsDir)) {
+        mkdirSync(logsDir, { recursive: true });
+      }
+      const date = new Date().toISOString().slice(0, 10);
+      this.logFilePath = resolve(logsDir, `tcoder-${date}.log`);
+      return this.logFilePath;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeToFile(entry: LogEntry, formatted: string): void {
+    const filePath = this.getLogFilePath();
+    if (!filePath) return;
+    try {
+      appendFileSync(filePath, `${formatted}\n`, 'utf-8');
+    } catch {
+      // Best-effort file logging; suppress errors to avoid feedback loops
     }
   }
 
@@ -97,18 +132,20 @@ export class Logger {
       this.history = this.history.slice(-this.maxHistory);
     }
 
-    if (this.silent) return;
-
     const levelPrefix = this.getLevelPrefix(level);
     const prefixStr = this.prefix ? `[${this.prefix}] ` : '';
     const contextStr = context ? ` ${JSON.stringify(context)}` : '';
+    const ts = new Date(entry.timestamp).toISOString();
+    const formatted = `${ts} ${levelPrefix} ${prefixStr}${message}${contextStr}`;
 
-    const output = `${levelPrefix} ${prefixStr}${message}${contextStr}`;
+    this.writeToFile(entry, formatted);
 
-    if (level >= LogLevel.ERROR) {
-      process.stderr.write(`${output}\n`);
-    } else {
-      process.stdout.write(`${output}\n`);
+    if (!this.silent) {
+      if (level >= LogLevel.ERROR) {
+        process.stderr.write(`${formatted}\n`);
+      } else {
+        process.stdout.write(`${formatted}\n`);
+      }
     }
 
     for (const listener of this.listeners) {
@@ -131,7 +168,7 @@ let defaultLogger: Logger | null = null;
 
 export function getLogger(): Logger {
   if (!defaultLogger) {
-    defaultLogger = new Logger();
+    defaultLogger = new Logger({ silent: true, fileLogging: true });
   }
   return defaultLogger;
 }

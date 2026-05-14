@@ -114,4 +114,5 @@ export interface Conversation {
   model: string;
   title?: string;
   tags?: string[];
+  totalCostCents?: number;
 }

@@ -26,7 +26,8 @@ export const SPINNER_VERBS = [
 
 export const MAX_CONVERSATION_MESSAGES = 500;
 export const COMPACT_THRESHOLD = 400;
-export const MAX_TOOL_CALLS_PER_TURN = 50;
+export const COMPACT_TARGET = 200;
+export const MAX_TOOL_CALLS_PER_TURN = 250;
 
 export const FILE_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
 export const MAX_FILE_LINES = 2000;

@@ -3,7 +3,7 @@ import { resolve, basename } from 'node:path';
 import { getAppDataDir } from './utils/shell.ts';
 import { SESSIONS_DIR } from './constants/common.ts';
 import type { Conversation, Message } from './types/message.ts';
-import { DEFAULT_MODEL, COMPACT_THRESHOLD, MAX_CONVERSATION_MESSAGES } from './constants/common.ts';
+import { DEFAULT_MODEL, COMPACT_THRESHOLD, COMPACT_TARGET, MAX_CONVERSATION_MESSAGES } from './constants/common.ts';
 
 export interface SessionMeta {
   id: string;
@@ -159,9 +159,34 @@ export function getOrCreateSession(sessionId?: string): Conversation {
   };
 }
 
-export function autoSaveSession(conversation: Conversation): void {
+export function autoSaveSession(conversation: Conversation, sessionCostCents?: number): void {
   if (conversation.messages.length === 0) return;
+  if (sessionCostCents !== undefined) {
+    conversation = { ...conversation, totalCostCents: sessionCostCents };
+  }
   saveSession(conversation);
+}
+
+export function compactMessages(messages: Message[]): Message[] {
+  if (messages.length < COMPACT_THRESHOLD) return messages;
+
+  const firstUserIdx = messages.findIndex(m => m.type === 'user');
+  const head = firstUserIdx >= 0 ? messages.slice(0, firstUserIdx + 1) : [];
+  const tail = messages.slice(-COMPACT_TARGET);
+
+  const droppedCount = messages.length - head.length - tail.length;
+  if (droppedCount <= 0) return messages;
+
+  const compactNotice: import('./types/message.ts').SystemMessage = {
+    type: 'system',
+    role: 'system',
+    content: `[${droppedCount} earlier messages removed to stay within context limits]`,
+    uuid: `sys_compact_${Date.now()}`,
+    subtype: 'compact',
+    timestamp: Date.now(),
+  };
+
+  return [...head, compactNotice, ...tail];
 }
 
 export function shouldCompact(messages: Message[]): boolean {

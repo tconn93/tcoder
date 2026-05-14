@@ -3,7 +3,7 @@ import { extname, resolve, isAbsolute } from 'node:path';
 import { z } from 'zod';
 import { createToolResult, createErrorResult, truncateContent } from '../shared/toolHelpers.ts';
 import { FILE_READ_PROMPT } from './prompt.ts';
-import { MAX_FILE_LINES } from '../../constants/common.ts';
+import { MAX_FILE_LINES, FILE_SIZE_LIMIT } from '../../constants/common.ts';
 import type { ToolDefinition, ToolUseContext, ToolResult } from '../../types/tool.ts';
 import type { FileReadInput } from './types.ts';
 
@@ -102,6 +102,12 @@ Usage:
 
       const mimeType = isImageFile(filePath) ? `image/${extname(filePath).slice(1)}` :
         isPdfFile(filePath) ? 'application/pdf' : 'text/plain';
+
+      if (stats.size > FILE_SIZE_LIMIT) {
+        return createErrorResult(
+          `File is too large to read: ${filePath} (${(stats.size / 1024 / 1024).toFixed(1)}MB, limit is ${FILE_SIZE_LIMIT / 1024 / 1024}MB). Use offset/limit to read specific sections.`,
+        );
+      }
 
       const isBinary = !isLikelyText(filePath);
 

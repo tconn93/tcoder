@@ -4,7 +4,7 @@ import { AppStateManager, selectMessages } from './state/AppState.ts';
 import { getToolRegistry } from './tools.ts';
 import { getCommandRegistry } from './commands.ts';
 import { getCostTracker } from './cost-tracker.ts';
-import { autoSaveSession, shouldCompact, generateSessionTitle } from './history.ts';
+import { autoSaveSession, shouldCompact, compactMessages, generateSessionTitle } from './history.ts';
 import {
   queryClaudeStream,
   buildQuerySystemPrompt,
@@ -32,6 +32,7 @@ export interface AppInstance {
 
 const COMMAND_PREFIX = '/';
 const MAX_CONSECUTIVE_TOOL_TURNS = 10;
+const MAX_IDENTICAL_TOOL_CALLS = 3;
 
 export function createApp(options: AppOptions = {}): AppInstance {
   let abortController: AbortController | null = null;
@@ -181,6 +182,22 @@ async function processUserMessage(
   await runConversationLoop(store, options, userMessage);
 }
 
+function makeConfirmFn(): (toolName: string, input: Record<string, unknown>) => Promise<boolean> {
+  return (toolName, input) =>
+    new Promise((resolve) => {
+      const desc = input.description ?? input.command ?? input.file_path ?? '';
+      const hint = desc ? ` (${String(desc).slice(0, 60)})` : '';
+      process.stdout.write(`\n\x1b[33mAllow '${toolName}'${hint}? [Y/n]: \x1b[0m`);
+      const { createInterface: _createInterface } = require('node:readline');
+      const rl = _createInterface({ input: process.stdin, output: process.stdout, terminal: false });
+      rl.once('line', (answer: string) => {
+        rl.close();
+        const trimmed = answer.trim().toLowerCase();
+        resolve(trimmed === '' || trimmed === 'y' || trimmed === 'yes');
+      });
+    });
+}
+
 async function runConversationLoop(
   store: ReturnType<typeof getAppStateStore>,
   options: AppOptions,
@@ -190,6 +207,7 @@ async function runConversationLoop(
   const toolRegistry = getToolRegistry();
   const costTracker = getCostTracker();
   let consecutiveToolTurns = 0;
+  const toolCallFrequency = new Map<string, number>();
 
   store.setState({ isThinking: true, currentProgress: 'Thinking...' });
 
@@ -197,12 +215,12 @@ async function runConversationLoop(
     while (consecutiveToolTurns < MAX_CONSECUTIVE_TOOL_TURNS) {
       state = store.getState();
 
-      // Check compaction
+      // Compact messages when approaching threshold
       if (shouldCompact(state.messages)) {
-        store.setState({
-          currentProgress: 'Compacting conversation...',
-        });
         console.log('\x1b[33mCompacting conversation (message limit approaching)...\x1b[0m');
+        const compacted = compactMessages(state.messages);
+        store.setState({ messages: compacted, currentProgress: 'Thinking...' });
+        state = store.getState();
       }
 
       // Build system prompt
@@ -291,9 +309,29 @@ async function runConversationLoop(
         break;
       }
 
+      // Detect tool loops (same tool+input called too many times)
+      let loopDetected = false;
+      for (const call of toolCalls) {
+        const key = `${call.name}:${JSON.stringify(call.input)}`;
+        const count = (toolCallFrequency.get(key) ?? 0) + 1;
+        toolCallFrequency.set(key, count);
+        if (count >= MAX_IDENTICAL_TOOL_CALLS) {
+          console.log(`\n\x1b[33mTool loop detected: '${call.name}' called ${count} times with identical input. Stopping.\x1b[0m`);
+          loopDetected = true;
+          break;
+        }
+      }
+      if (loopDetected) break;
+
       // Execute tool calls
       console.log(`\n\x1b[2mExecuting ${toolCalls.length} tool call(s)...\x1b[0m`);
       store.setState({ currentProgress: `Executing tools (${toolCalls.length})...` });
+
+      const permMode = state.permissionMode;
+      const confirmFn =
+        permMode === 'default' || permMode === 'acceptEdits'
+          ? makeConfirmFn()
+          : undefined;
 
       const executed = await executeToolCalls(
         toolCalls,
@@ -304,6 +342,7 @@ async function runConversationLoop(
           workingDirectory: state.workingDirectory,
           signal: new AbortController().signal,
           messages: store.getState().messages,
+          confirmFn,
           onProgress: (toolName, status) => {
             if (status === 'started') {
               store.setState({ currentProgress: `Running: ${toolName}` });
@@ -326,15 +365,19 @@ async function runConversationLoop(
     }
 
     // Auto-save after each turn
-    const conv = store.getState().conversation;
+    const currentState = store.getState();
+    const conv = currentState.conversation;
     if (conv) {
-      conv.messages = store.getState().messages;
-      conv.updatedAt = Date.now();
-      if (!conv.title || conv.title === 'New Session') {
-        conv.title = generateSessionTitle(conv.messages);
-      }
-      autoSaveSession(conv);
-      store.setState({ conversation: conv });
+      const updatedConv = {
+        ...conv,
+        messages: currentState.messages,
+        updatedAt: Date.now(),
+        title: (conv.title && conv.title !== 'New Session')
+          ? conv.title
+          : generateSessionTitle(currentState.messages),
+      };
+      autoSaveSession(updatedConv, costTracker.getSessionCost().totalCostCents);
+      store.setState({ conversation: updatedConv });
     }
   } catch (err) {
     console.error(`\n\x1b[31mQuery error: ${err instanceof Error ? err.message : String(err)}\x1b[0m`);
