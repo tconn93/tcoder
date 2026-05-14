@@ -4,7 +4,7 @@ Terminal-based AI coding assistant — TypeScript rewrite.
 
 ## Overview
 
-tcoder is a terminal-native AI coding assistant that helps developers write, edit, and understand code. It uses the Claude API to provide intelligent assistance with a suite of tools for file operations, shell commands, web search, and task management.
+tcoder is a terminal-native AI coding assistant that helps developers write, edit, and understand code. It uses the XAI's API to provide intelligent assistance with a suite of tools for file operations, shell commands, web search, and task management.
 
 ## Features
 
