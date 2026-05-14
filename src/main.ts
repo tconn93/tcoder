@@ -9,6 +9,7 @@ import {
   queryClaudeStream,
   buildQuerySystemPrompt,
   executeToolCalls,
+  createToolResultMessage,
 } from './query.ts';
 import { detectShell } from './utils/shell.ts';
 import type { UserMessage, AssistantMessage, TextBlock, ThinkingBlock } from './types/message.ts';
@@ -310,23 +311,33 @@ async function runConversationLoop(
         break;
       }
 
-      // Detect tool loops (same tool+input called too many times)
-      let loopDetected = false;
+      // Separate looping calls from normal ones.
+      // Looping calls get a synthetic guidance result so the model can self-correct;
+      // normal calls execute as usual. The hard turn limit remains the safety net.
+      const normalCalls: typeof toolCalls = [];
+      const loopGuidanceMessages: import('./types/message.ts').Message[] = [];
+
       for (const call of toolCalls) {
         const key = `${call.name}:${JSON.stringify(call.input)}`;
         const count = (toolCallFrequency.get(key) ?? 0) + 1;
         toolCallFrequency.set(key, count);
+
         if (count >= MAX_IDENTICAL_TOOL_CALLS) {
-          console.log(`\n\x1b[33mTool loop detected: '${call.name}' called ${count} times with identical input. Stopping.\x1b[0m`);
-          loopDetected = true;
-          break;
+          const guidance =
+            `You have called '${call.name}' ${count} times with identical input and received ` +
+            `the same result each time. Calling it again will not produce a different outcome. ` +
+            `Please try a different approach, use a different tool, or explain to the user why you cannot proceed.`;
+          console.log(`\n\x1b[33mTool loop: '${call.name}' called ${count}x — injecting guidance.\x1b[0m`);
+          loopGuidanceMessages.push(createToolResultMessage(call.callId, { content: guidance, isError: false }));
+          toolCallFrequency.delete(key); // reset so a genuine retry is allowed later
+        } else {
+          normalCalls.push(call);
         }
       }
-      if (loopDetected) break;
 
       // Execute tool calls
-      console.log(`\n\x1b[2mExecuting ${toolCalls.length} tool call(s)...\x1b[0m`);
-      store.setState({ currentProgress: `Executing tools (${toolCalls.length})...` });
+      console.log(`\n\x1b[2mExecuting ${normalCalls.length} tool call(s)...\x1b[0m`);
+      store.setState({ currentProgress: `Executing tools (${normalCalls.length})...` });
 
       const permMode = state.permissionMode;
       const confirmFn =
@@ -334,27 +345,29 @@ async function runConversationLoop(
           ? makeConfirmFn()
           : undefined;
 
-      const executed = await executeToolCalls(
-        toolCalls,
-        toolRegistry.tools,
-        {
-          sessionId: state.sessionId,
-          permissionMode: state.permissionMode,
-          workingDirectory: state.workingDirectory,
-          signal: new AbortController().signal,
-          messages: store.getState().messages,
-          confirmFn,
-          onProgress: (toolName, status) => {
-            if (status === 'started') {
-              store.setState({ currentProgress: `Running: ${toolName}` });
-            }
+      const executed = normalCalls.length > 0
+        ? await executeToolCalls(
+          normalCalls,
+          toolRegistry.tools,
+          {
+            sessionId: state.sessionId,
+            permissionMode: state.permissionMode,
+            workingDirectory: state.workingDirectory,
+            signal: new AbortController().signal,
+            messages: store.getState().messages,
+            confirmFn,
+            onProgress: (toolName, status) => {
+              if (status === 'started') {
+                store.setState({ currentProgress: `Running: ${toolName}` });
+              }
+            },
           },
-        },
-      );
+        )
+        : { messages: [], functionCallOutputs: [] };
 
-      // Add tool results and continue loop
+      // Add tool results (including any loop guidance) and continue loop
       store.setState({
-        messages: [...store.getState().messages, ...executed.messages],
+        messages: [...store.getState().messages, ...executed.messages, ...loopGuidanceMessages],
         currentProgress: 'Thinking...',
       });
 
