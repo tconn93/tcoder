@@ -21,6 +21,7 @@ export interface AppOptions {
   workingDir?: string;
   nonInteractive?: boolean;
   stream?: boolean;
+  dangerouslyNoPermissionRequests?: boolean;
 }
 
 export interface AppInstance {
@@ -401,6 +402,9 @@ export async function startup(options: AppOptions): Promise<AppInstance> {
   }
   if (options.workingDir) {
     store.setState({ workingDirectory: options.workingDir });
+  }
+  if (options.dangerouslyNoPermissionRequests) {
+    store.setState({ permissionMode: 'bypassPermissions' });
   }
   if (options.sessionId) {
     const { loadSession } = await import('./history.ts');
